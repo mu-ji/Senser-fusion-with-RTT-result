@@ -56,28 +56,67 @@ class senser_node():
     def get_acceleration(self):
         return self.acceleration
 
-class KalmanFilter:
-    def __init__(self, dt, noise_cov):
-        self.dt = dt  # 时间步长
-        self.A = np.array([[1, 0], [0, 1]])  # 状态转移矩阵
-        self.H = np.array([[1, 0]])  # 观测矩阵
-        self.Q = noise_cov * np.eye(2)  # 系统噪声协方差矩阵
-        self.R = noise_cov  # 观测噪声方差
+class Kalman_Filter():
+    def __init__(self,dt):
+        #x.T = [Px,Py,Pz,Vx,Vy,Vz]
+        self.x_pred = np.array([[0],[0],[0],[0],[0],[0]])
+        self.x_est = np.array([[0],[0],[0],[0],[0],[0]])
+        self.p_pred = np.eye(6)
+        self.p_est = np.eye(6)
+        self.y = 0      #residual
+        self.K = np.array([[0],[0],[0],[0],[0],[0]])
+        self.A = np.array([[1,0,0,dt,0,0],
+                      [0,1,0,0,dt,0],
+                      [0,0,1,0,0,dt],
+                      [0,0,0,1,0,0],
+                      [0,0,0,0,1,0],
+                      [0,0,0,0,0,1]])
+        #u.T = [ax,ay,az]
+        self.B = np.array([[0.5*dt**2,0,0],
+                      [0,0.5*dt**2,0],
+                      [0,0,0.5*dt**2],
+                      [dt,0,0],
+                      [0,dt,0],
+                      [0,0,dt]])
+        # process noise matrix
+        self.Q = np.array([[0.01,0,0],
+                      [0,0.01,0],
+                      [0,0,0.01]])
+        # measurement matrix
+        self.H = np.array([self.x_est[0][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                           self.x_est[1][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                           self.x_est[2][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                           0,
+                           0,
+                           0])
+        # measurement noise matrix
+        self.R = np.array([0.01])
 
-        self.x = np.zeros((2, 1))  # 状态估计向量
-        self.P = np.zeros((2, 2))  # 状态估计协方差矩阵
+    def update_H(self):
+        self.H = np.array([self.x_est[0][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                           self.x_est[1][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                           self.x_est[2][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                           0,
+                           0,
+                           0])
+    def state_predict(self,u):
+        self.x_est_pred = self.A.dot(self.x_est_est) + self.B.dot(u)
+        self.p_pred = self.A.dot(self.p_est).dot(self.A.T)
 
-    def predict(self):
-        self.x = np.dot(self.A, self.x)
-        self.P = np.dot(np.dot(self.A, self.P), self.A.T) + self.Q
+    def state_update(self,measurement):
+        self.y = measurement - self.H.dot(self.x_est_pred)
+        self.K = self.p_pred.dot(self.H.T).dot(np.linalg.inv(self.H.dot(self.p_pred).dot(self.H.T)+self.R))
+        self.x_est_est = self.x_est_pred + self.K.dot(self.y)
+        self.p_est = (np.eye(6)-self.K.dot(self.H)).dot(self.p_pred)
 
-    def update(self, measurement):
-        y = measurement - np.dot(self.H, self.x)
-        S = np.dot(np.dot(self.H, self.P), self.H.T) + self.R
-        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S))
+    def get_x_pred(self):
+        return self.x_est_pred
 
-        self.x = self.x + np.dot(K, y)
-        self.P = np.dot((np.eye(2) - np.dot(K, self.H)), self.P)
+    def get_x_est(self):
+        return self.x_est_est            
+
+def ML_model_predic():
+    return 0
 
 #the main function using for visualizing the senser node position
 def main():
@@ -85,6 +124,8 @@ def main():
     rawFrame = []
     DATA_INTERVAL = 0.0625
     
+    KF = Kalman_Filter(DATA_INTERVAL) 
+
     #init pygame for visualization
     #pygame.init()
     #set windows width and height
@@ -111,8 +152,6 @@ def main():
     bmx160_senser = senser_node(node_pos[0],node_pos[1],0,DATA_INTERVAL)
 
     dt = DATA_INTERVAL
-    noise_cov = 0.01
-    kf = KalmanFilter(dt, noise_cov)
     
     accx_list = []
     accy_list = []
@@ -132,9 +171,15 @@ def main():
         rawFrame += byte
 
         if rawFrame[-2:]==[13, 10]:
-            if len(rawFrame) == 8:        
-                #print(rawFrame)                    
-                (x_acc, y_acc, z_acc) = struct.unpack('>hhh', bytes(rawFrame[:-2]))                         
+            #print(rawFrame)
+            if len(rawFrame) == 16:        
+                print(rawFrame)
+                decimal_data = int.from_bytes(rawFrame[:4],byteorder='big')
+                print('RTT time:',decimal_data)
+                rssi = bytes(rawFrame[4:8])
+                rssi = rssi.decode('utf-8')
+                print('rssi:',rssi)
+                (x_acc, y_acc, z_acc) = struct.unpack('>hhh', bytes(rawFrame[-8:-2]))                         
                 # debug info
                 output = 'acc_x={0:<3} acc_y={1:<3} acc_z={2:<3}'.format(
                     x_acc,
@@ -148,9 +193,9 @@ def main():
             acc_reso = 415
             DATA_INTERVAL = 0.0625
 
-            x_acc = float(x_acc)/float(4096)
-            y_acc = float(y_acc)/float(4096)
-            z_acc = float(z_acc)/float(4096)
+            x_acc = float(x_acc)/float(4096)*8
+            y_acc = float(y_acc)/float(4096)*8
+            z_acc = float(z_acc)/float(4096)*8
 
             accx_list.append(x_acc)
             accy_list.append(y_acc)
@@ -158,6 +203,11 @@ def main():
             print('acc output:',x_acc,y_acc,z_acc)
 
             bmx160_senser.updata(x_acc,y_acc,z_acc-9.8,0)
+            KF.update_H()
+            KF.state_predict(np.array([[x_acc],[y_acc],[z_acc-9.8]]))
+
+            measurement = ML_model_predic()
+            KF.state_update(measurement)
 
             bmx160_position = bmx160_senser.get_position()
             bmx160_v = bmx160_senser.get_velocity()
