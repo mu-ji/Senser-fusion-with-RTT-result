@@ -83,40 +83,45 @@ class Kalman_Filter():
                       [0,0.01,0],
                       [0,0,0.01]])
         # measurement matrix
-        self.H = np.array([self.x_est[0][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
-                           self.x_est[1][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
-                           self.x_est[2][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+        self.H = np.array([0,
+                           0,
+                           0,
                            0,
                            0,
                            0])
         # measurement noise matrix
-        self.R = np.array([0.01])
+        self.R = np.array([100])
 
     def update_H(self):
-        self.H = np.array([self.x_est[0][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
-                           self.x_est[1][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
-                           self.x_est[2][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
-                           0,
-                           0,
-                           0])
+        if self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2 == 0:
+            self.H = np.array([0,0,0,0,0,0])
+        else:
+            self.H = np.array([self.x_est[0][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                            self.x_est[1][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                            self.x_est[2][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+                            0,
+                            0,
+                            0])
     def state_predict(self,u):
-        self.x_est_pred = self.A.dot(self.x_est_est) + self.B.dot(u)
+        self.x_pred = self.A.dot(self.x_est) + self.B.dot(u)
         self.p_pred = self.A.dot(self.p_est).dot(self.A.T)
 
     def state_update(self,measurement):
-        self.y = measurement - self.H.dot(self.x_est_pred)
-        self.K = self.p_pred.dot(self.H.T).dot(np.linalg.inv(self.H.dot(self.p_pred).dot(self.H.T)+self.R))
-        self.x_est_est = self.x_est_pred + self.K.dot(self.y)
+        self.y = measurement - self.H.dot(self.x_pred)
+        #self.K = self.p_pred.dot(self.H.T).dot(np.linalg.inv(self.H.dot(self.p_pred).dot(self.H.T)+self.R))
+        self.K = self.p_pred.dot(self.H.T)/(self.H.dot(self.p_pred).dot(self.H.T)+self.R)
+        self.x_est = self.x_pred + self.K.reshape((6,1)).dot(self.y.reshape((1,1)))
         self.p_est = (np.eye(6)-self.K.dot(self.H)).dot(self.p_pred)
 
     def get_x_pred(self):
-        return self.x_est_pred
+        return self.x_pred
 
     def get_x_est(self):
-        return self.x_est_est            
+        return self.x_est            
 
-def ML_model_predic():
-    return 0
+def ML_model_predic(decimal_data):
+    distance = (float(decimal_data)-20074.659)/(2*16000000)*299792458
+    return distance
 
 #the main function using for visualizing the senser node position
 def main():
@@ -148,6 +153,7 @@ def main():
 
     node_pos = [0, 0]
     trail_points_x = [0]
+    trail_points_x_KF = [0]
     trail_points_y = [0]
     bmx160_senser = senser_node(node_pos[0],node_pos[1],0,DATA_INTERVAL)
 
@@ -169,11 +175,9 @@ def main():
 
         byte  = ser.read(1)        
         rawFrame += byte
-
         if rawFrame[-2:]==[13, 10]:
             #print(rawFrame)
-            if len(rawFrame) == 16:        
-                print(rawFrame)
+            if len(rawFrame) == 16:
                 decimal_data = int.from_bytes(rawFrame[:4],byteorder='big')
                 print('RTT time:',decimal_data)
                 rssi = bytes(rawFrame[4:8])
@@ -206,8 +210,12 @@ def main():
             KF.update_H()
             KF.state_predict(np.array([[x_acc],[y_acc],[z_acc-9.8]]))
 
-            measurement = ML_model_predic()
+            measurement = ML_model_predic(decimal_data)
             KF.state_update(measurement)
+
+            KF_position_est = KF.get_x_est()
+
+            trail_points_x_KF.append(KF_position_est[0][0])
 
             bmx160_position = bmx160_senser.get_position()
             bmx160_v = bmx160_senser.get_velocity()
@@ -236,6 +244,7 @@ def main():
     plt.figure()
     ax = plt.subplot(311)
     ax.plot([i for i in range(itration+1)],trail_points_x,c = 'r',label='x position')
+    #ax.plot([i for i in range(itration+1)],trail_points_x_KF,c = 'b',label='KF x position')
     ax.legend()
     ax = plt.subplot(312)
     ax.plot([i for i in range(itration+1)],vx_list,c = 'r',label='x velocity')
