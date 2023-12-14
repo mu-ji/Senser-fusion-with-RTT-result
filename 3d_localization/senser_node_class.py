@@ -79,9 +79,9 @@ class Kalman_Filter():
                       [0,dt,0],
                       [0,0,dt]])
         # process noise matrix
-        self.Q = np.array([[0.01,0,0],
-                      [0,0.01,0],
-                      [0,0,0.01]])
+        self.Q = np.array([[10,0,0],
+                      [0,10,0],
+                      [0,0,10]])
         # measurement matrix
         self.H = np.array([0,
                            0,
@@ -119,8 +119,15 @@ class Kalman_Filter():
     def get_x_est(self):
         return self.x_est            
 
-def ML_model_predic(decimal_data):
-    distance = (float(decimal_data)-20074.659)/(2*16000000)*299792458
+def ML_model_predic(decimal_data,RTT_time_buffer):
+    if len(RTT_time_buffer) < 10:
+        RTT_time_buffer.append(decimal_data)
+    else:
+        RTT_time_buffer.pop(0)
+        RTT_time_buffer.append(decimal_data)
+    
+    distance = (float(decimal_data)-20074.659)/(2*16000000)*299792458*0.4
+    #distance = (float(np.mean(RTT_time_buffer))-20074.659)/(2*16000000)*222222222
     return distance
 
 #the main function using for visualizing the senser node position
@@ -166,6 +173,7 @@ def main():
     ax_list = [0]
     itration = 50
     times = 0
+    RTT_time_buffer = []
     while times < itration:
 
         #for event in pygame.event.get():
@@ -210,7 +218,8 @@ def main():
             KF.update_H()
             KF.state_predict(np.array([[x_acc],[y_acc],[z_acc-9.8]]))
 
-            measurement = ML_model_predic(decimal_data)
+            measurement = ML_model_predic(decimal_data,RTT_time_buffer)
+            print('measurement:',measurement)
             KF.state_update(measurement)
 
             KF_position_est = KF.get_x_est()
@@ -228,30 +237,19 @@ def main():
             ax_list.append(bmx160_a[0])
             times  = times + 1
 
-            # draw node positon and trajectory in window
-            #screen.fill((255, 255, 255))  # set background color
-            #pygame.draw.circle(screen, node_color, node_pos, 5)  # 绘制点
-            #pygame.draw.lines(screen, trail_color, False, trail_points)  # 绘制轨迹
-
-            # 绘制X轴
-            #pygame.draw.line(screen, axis_color, axis_start, axis_end_x, 2)
-
-            # 绘制Y轴
-            #pygame.draw.line(screen, axis_color, axis_start, axis_end_y, 2)
-
-            # 更新窗口显示
-            #pygame.display.flip()
     plt.figure()
     ax = plt.subplot(311)
     ax.plot([i for i in range(itration+1)],trail_points_x,c = 'r',label='x position')
-    #ax.plot([i for i in range(itration+1)],trail_points_x_KF,c = 'b',label='KF x position')
+    ax.plot([i for i in range(itration+1)],trail_points_x_KF,c = 'b',label='KF x position')
     ax.legend()
+    
     ax = plt.subplot(312)
     ax.plot([i for i in range(itration+1)],vx_list,c = 'r',label='x velocity')
     ax.legend()
     ax = plt.subplot(313)
     ax.plot([i for i in range(itration+1)],ax_list,c = 'r',label='x acceleration')
     ax.legend()
+    
     plt.show()
     print('accx:',np.mean(np.array(accx_list)))
     print('accy:',np.mean(np.array(accy_list)))
