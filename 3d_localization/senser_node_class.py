@@ -120,7 +120,7 @@ class Kalman_Filter():
         return self.x_est            
 
 def ML_model_predic(decimal_data,RTT_time_buffer):
-    if len(RTT_time_buffer) < 10:
+    if len(RTT_time_buffer) < 200:
         RTT_time_buffer.append(decimal_data)
     else:
         RTT_time_buffer.pop(0)
@@ -134,7 +134,7 @@ def ML_model_predic(decimal_data,RTT_time_buffer):
 def main():
     ser = serial.Serial('COM4', 115200)  # Replace 'COM3' with your serial port and baud rate
     rawFrame = []
-    DATA_INTERVAL = 0.0625
+    DATA_INTERVAL = 0.005
     
     KF = Kalman_Filter(DATA_INTERVAL) 
 
@@ -171,7 +171,7 @@ def main():
     accz_list = []
     vx_list = [0]
     ax_list = [0]
-    itration = 50
+    itration = 5000
     times = 0
     RTT_time_buffer = []
     while times < itration:
@@ -203,7 +203,7 @@ def main():
 
 
             acc_reso = 415
-            DATA_INTERVAL = 0.0625
+            DATA_INTERVAL = 0.005
 
             x_acc = float(x_acc)/float(4096)*8
             y_acc = float(y_acc)/float(4096)*8
