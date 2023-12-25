@@ -79,26 +79,26 @@ class Kalman_Filter():
                       [0,dt,0],
                       [0,0,dt]])
         # process noise matrix
-        self.Q = np.array([[10,0,0],
-                      [0,10,0],
-                      [0,0,10]])
+        self.Q = np.array([[0.1,0,0],
+                      [0,0.1,0],
+                      [0,0,0.1]])
         # measurement matrix
-        self.H = np.array([0,
+        self.H = np.array([1,
                            0,
                            0,
                            0,
                            0,
                            0])
         # measurement noise matrix
-        self.R = np.array([100])
+        self.R = np.array([0.01])
 
     def update_H(self):
         if self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2 == 0:
-            self.H = np.array([0,0,0,0,0,0])
+            self.H = np.array([1,0,0,0,0,0])
         else:
-            self.H = np.array([self.x_est[0][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
-                            self.x_est[1][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
-                            self.x_est[2][0]/(self.x_est[0][0]**2+self.x_est[1][0]**2+self.x_est[2][0]**2)**0.5,
+            self.H = np.array([1,
+                            0,
+                            0,
                             0,
                             0,
                             0])
@@ -117,7 +117,15 @@ class Kalman_Filter():
         return self.x_pred
 
     def get_x_est(self):
-        return self.x_est            
+        return self.x_est
+
+    def show_parameters(self):
+        print(self.x_pred)
+        print(self.p_pred)
+        print(self.x_est)
+        print(self.p_est)
+        print(self.K)
+        return
 
 def ML_model_predic(decimal_data,RTT_time_buffer):
     if len(RTT_time_buffer) < 200:
@@ -125,9 +133,9 @@ def ML_model_predic(decimal_data,RTT_time_buffer):
     else:
         RTT_time_buffer.pop(0)
         RTT_time_buffer.append(decimal_data)
-    
-    distance = (float(decimal_data)-20074.659)/(2*16000000)*299792458*0.4
-    #distance = (float(np.mean(RTT_time_buffer))-20074.659)/(2*16000000)*222222222
+
+    #distance = (float(decimal_data)-20074.659)/(2*16000000)*299792458*0.4
+    distance = (float(np.mean(RTT_time_buffer))-20074.659)/(2*16000000)*222222222
     return distance
 
 #the main function using for visualizing the senser node position
@@ -162,6 +170,7 @@ def main():
     trail_points_x = [0]
     trail_points_x_KF = [0]
     trail_points_y = [0]
+
     bmx160_senser = senser_node(node_pos[0],node_pos[1],0,DATA_INTERVAL)
 
     dt = DATA_INTERVAL
@@ -171,10 +180,12 @@ def main():
     accz_list = []
     vx_list = [0]
     ax_list = [0]
-    itration = 5000
+    measurement_list = []
+    itration = 1000
     times = 0
     RTT_time_buffer = []
     while times < itration:
+    #while True:
 
         #for event in pygame.event.get():
         #    if event.type == pygame.QUIT:
@@ -185,10 +196,12 @@ def main():
         rawFrame += byte
         if rawFrame[-2:]==[13, 10]:
             #print(rawFrame)
-            if len(rawFrame) == 16:
-                decimal_data = int.from_bytes(rawFrame[:4],byteorder='big')
+            if len(rawFrame) == 17:
+                recevier_id = rawFrame[0]
+                print('receiver_id:',recevier_id)
+                decimal_data = int.from_bytes(rawFrame[1:5],byteorder='big')
                 print('RTT time:',decimal_data)
-                rssi = bytes(rawFrame[4:8])
+                rssi = bytes(rawFrame[5:9])
                 rssi = rssi.decode('utf-8')
                 print('rssi:',rssi)
                 (x_acc, y_acc, z_acc) = struct.unpack('>hhh', bytes(rawFrame[-8:-2]))                         
@@ -205,9 +218,9 @@ def main():
             acc_reso = 415
             DATA_INTERVAL = 0.005
 
-            x_acc = float(x_acc)/float(4096)*8
-            y_acc = float(y_acc)/float(4096)*8
-            z_acc = float(z_acc)/float(4096)*8
+            x_acc = float(x_acc)/float(4096)*8-0.15
+            y_acc = float(y_acc)/float(4096)*8+0.19
+            z_acc = float(z_acc)/float(4096)*8+2
 
             accx_list.append(x_acc)
             accy_list.append(y_acc)
@@ -219,6 +232,7 @@ def main():
             KF.state_predict(np.array([[x_acc],[y_acc],[z_acc-9.8]]))
 
             measurement = ML_model_predic(decimal_data,RTT_time_buffer)
+            measurement_list.append(measurement)
             print('measurement:',measurement)
             KF.state_update(measurement)
 
@@ -236,20 +250,27 @@ def main():
             vx_list.append(bmx160_v[0])
             ax_list.append(bmx160_a[0])
             times  = times + 1
-
+            print('times:',times)
+            if times >= 430:
+                KF.show_parameters()
     plt.figure()
     ax = plt.subplot(311)
-    ax.plot([i for i in range(itration+1)],trail_points_x,c = 'r',label='x position')
-    ax.plot([i for i in range(itration+1)],trail_points_x_KF,c = 'b',label='KF x position')
+    ax.plot([i for i in range(itration+1)],trail_points_x,c = 'r',marker = 'o', label='x position')
+    ax.plot([i for i in range(itration)],measurement_list,c = 'y',marker = 'o',label='RTT measurement')
+    ax.plot([i for i in range(itration+1)],trail_points_x_KF,c = 'b',marker = 'o',label='KF x position')
     ax.legend()
-    
+    ax.grid()
+
     ax = plt.subplot(312)
     ax.plot([i for i in range(itration+1)],vx_list,c = 'r',label='x velocity')
     ax.legend()
+    ax.grid()
+
     ax = plt.subplot(313)
     ax.plot([i for i in range(itration+1)],ax_list,c = 'r',label='x acceleration')
     ax.legend()
-    
+    ax.grid()
+
     plt.show()
     print('accx:',np.mean(np.array(accx_list)))
     print('accy:',np.mean(np.array(accy_list)))
