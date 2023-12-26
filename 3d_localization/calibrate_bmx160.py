@@ -19,14 +19,15 @@ def measure_bmx160_noise():
     accx_list = []
     accy_list = []
     accz_list = []
+    RTT_list = []
     while times < itration:
             byte  = ser.read(1)        
             rawFrame += byte
             if rawFrame[-2:]==[13, 10]:
                 #print(rawFrame)
-                if len(rawFrame) == 16:
+                if len(rawFrame) == 17:
                     decimal_data = int.from_bytes(rawFrame[:4],byteorder='big')
-                    rssi = bytes(rawFrame[4:8])
+                    rssi = bytes(rawFrame[5:9])
                     rssi = rssi.decode('utf-8')
                     (x_acc, y_acc, z_acc) = struct.unpack('>hhh', bytes(rawFrame[-8:-2]))                         
                     # debug info
@@ -49,25 +50,31 @@ def measure_bmx160_noise():
                 accx_list.append(x_acc)
                 accy_list.append(y_acc)
                 accz_list.append(z_acc)
+                RTT_list.append(decimal_data)
                 times  = times + 1
     
-    return np.mean(np.array(accx_list)), np.mean(np.array(accy_list)), np.mean(np.array(accz_list))
+    return np.mean(np.array(accx_list)), np.mean(np.array(accy_list)), np.mean(np.array(accz_list)), np.mean(np.array(RTT_list))
 
 x_mean_list = []
 y_mean_list = []
 z_mean_list = []
+RTT_based_mean_list = []
 for i in range(10):
-    x_noise,y_noise,z_noise = measure_bmx160_noise()
+    x_noise,y_noise,z_noise,RTT_based = measure_bmx160_noise()
     x_mean_list.append(x_noise)
     y_mean_list.append(y_noise)
     z_mean_list.append(z_noise)
+    RTT_based_mean_list.append(RTT_based)
 
 x_mean_noise = np.mean(np.array(x_mean_list))
 y_mean_noise = np.mean(np.array(y_mean_list))
 z_mean_noise = np.mean(np.array(z_mean_list))
+RTT_based_value = np.mean(np.array(RTT_based_mean_list))
+
 print(x_mean_noise)
 print(y_mean_noise)
 print(z_mean_noise)
+print(RTT_based_value)
 
 
 plt.figure

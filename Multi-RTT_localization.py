@@ -83,14 +83,15 @@ class Kalman_Filter():
         return
 
 def RTT_range_predic(decimal_data,RTT_time_buffer):
+
     if len(RTT_time_buffer) < 200:
         RTT_time_buffer.append(decimal_data)
     else:
         RTT_time_buffer.pop(0)
         RTT_time_buffer.append(decimal_data)
 
-    #distance = (float(decimal_data)-20074.659)/(2*16000000)*299792458*0.4
-    distance = (float(np.mean(RTT_time_buffer))-20074.659)/(2*16000000)*222222222
+    distance = (float(np.mean(RTT_time_buffer))-20073.659)/(2*16000000)*299792458*0.4
+    #distance = (float(np.mean(RTT_time_buffer))-20074.659)/(2*16000000)*222222222
     return distance
 
 def estimate_point_position(x1, y1, x2, y2, x3, y3, r1, r2, r3):
@@ -139,9 +140,9 @@ def main():
     receiver3_measurement = 0
 
     receiver_one_position = [0, 0]
-    receiver_two_position = [5, 0]
-    receiver_three_positon = [0, 5]
-    recevier_id = 0
+    receiver_two_position = [5.25, 0]
+    receiver_three_positon = [5.25, 2.5]
+    receiver_id = 0
 
     est_x_list = []
     est_y_list = []
@@ -151,10 +152,9 @@ def main():
         byte  = ser.read(1)        
         rawFrame += byte
         if rawFrame[-2:]==[13, 10]:
-            #print(rawFrame)
             if len(rawFrame) == 17:
                 receiver_id = rawFrame[0]
-                print('receiver_id:',recevier_id)
+                print('receiver_id:',receiver_id)
                 decimal_data = int.from_bytes(rawFrame[1:5],byteorder='big')
                 print('RTT time:',decimal_data)
                 rssi = bytes(rawFrame[5:9])
@@ -169,7 +169,7 @@ def main():
                 )
             
             if receiver_id == 1:
-                receiver1_measurement = RTT_range_predic(decimal_data, receiver1_buffer)
+                receiver1_measurement = RTT_range_predic(decimal_data-1, receiver1_buffer)
                 receiver1_measurement_list.append(receiver1_measurement)
             if receiver_id == 2:
                 receiver2_measurement = RTT_range_predic(decimal_data, receiver2_buffer)
@@ -182,30 +182,46 @@ def main():
             acc_reso = 415
             DATA_INTERVAL = 0.005
 
-            x_acc = float(x_acc)/float(4096)*8-0.15
+            x_acc = float(
+                x_acc)/float(4096)*8-0.15
             y_acc = float(y_acc)/float(4096)*8+0.19
             z_acc = float(z_acc)/float(4096)*8+2
 
             print('acc output:',x_acc,y_acc,z_acc)
+            print('RTT measurement:', receiver1_measurement,receiver2_measurement,receiver3_measurement)
 
-            est_x, est_y = estimate_point_position(0,0,5,0,0,5,receiver1_measurement,receiver2_measurement,receiver3_measurement)
+            est_x, est_y = estimate_point_position(0,0,5.25,0,5.25,2.5,receiver1_measurement,receiver2_measurement,receiver3_measurement)
+            print(est_x,est_y)
             est_x_list.append(est_x)
             est_y_list.append(est_y)
 
             times  = times + 1
             print('times:',times)
 
+    print('1:',np.mean(receiver1_buffer))
+    print('2:',np.mean(receiver2_buffer))
+    print('3:',np.mean(receiver3_buffer))
+
     plt.figure()
-    ax = plt.subplot(111)
-    ax.plot(est_x_list,est_y_list,c='b',label='estimate prosition')
-    ax.scatter(est_x_list[-1],est_y_list[-1],c='r')
+    ax = plt.subplot(211)
+    #ax.plot(est_x_list,est_y_list,c='b',label='estimate prosition')
+    ax.scatter(est_x_list[-1],est_y_list[-1],c='r',label='estimate position')
     ax.scatter(0,0,c='b')
-    ax.scatter(5,0,c='b')
-    ax.scatter(0,5,c='b')
+    ax.scatter(5.25,0,c='b')
+    ax.scatter(5.25,2.5,c='b')
+    ax.scatter(3.69,1.58,c='g',label='true position')
+    ax.legend()
+    ax.grid()
+    
+
+    ax = plt.subplot(212)
+    ax.plot([i for i in range(len(receiver1_measurement_list))],receiver1_measurement_list,c='r',label='receiver 1')
+    ax.plot([i for i in range(len(receiver2_measurement_list))],receiver2_measurement_list,c='g',label='receiver 2')
+    ax.plot([i for i in range(len(receiver3_measurement_list))],receiver3_measurement_list,c='b',label='receiver 3')
     ax.legend()
     ax.grid()
 
+
     plt.show()
     #pygame.quit()
-
 main()
