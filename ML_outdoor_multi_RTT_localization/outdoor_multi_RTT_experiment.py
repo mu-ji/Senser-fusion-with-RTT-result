@@ -11,6 +11,11 @@ import struct
 import math
 import pygame
 
+from sklearn.mixture import GaussianMixture
+import torch
+import torch.nn as nn
+import torch.optim as optim
+
 class Kalman_Filter():
     def __init__(self,dt):
         #x.T = [Px,Py,Pz,Vx,Vy,Vz]
@@ -82,17 +87,48 @@ class Kalman_Filter():
         print(self.K)
         return
 
-def RTT_range_predic(decimal_data,RTT_time_buffer):
+class RegressionNet(nn.Module):
+        def __init__(self, input_size, hidden_size, output_size):
+            super(RegressionNet, self).__init__()
+            self.fc1 = nn.Linear(input_size, hidden_size)
+            self.elu = nn.ELU()
+            self.fc2 = nn.Linear(hidden_size, hidden_size)
+            self.elu = nn.ELU()
+            self.fc3 = nn.Linear(hidden_size, output_size)
 
-    if len(RTT_time_buffer) < 200:
-        RTT_time_buffer.append(decimal_data)
+
+
+        def forward(self, x): 
+            out = self.fc1(x)
+            out = self.elu(out)
+            out = self.fc2(out)
+            out = self.elu(out)
+            out = self.fc3(out)
+            return out
+        
+def RTT_range_predic(decimal_data,RTT_time_buffer,based_RTT_time,rssi,receiver_RSSI_buffer):
+
+    if len(RTT_time_buffer) < 500:
+        RTT_time_buffer.append(decimal_data - based_RTT_time)
     else:
         RTT_time_buffer.pop(0)
-        RTT_time_buffer.append(decimal_data)
+        RTT_time_buffer.append(decimal_data - based_RTT_time)
+    
+    if len(receiver_RSSI_buffer) < 500:
+        receiver_RSSI_buffer.append(rssi)
+    else:
+        receiver_RSSI_buffer.pop(0)
+        receiver_RSSI_buffer.append(rssi)
 
-    distance = (float(np.mean(RTT_time_buffer))-20074.659)/(2*16000000)*299792458*0.4
+    distance = (float(np.mean(RTT_time_buffer)))/(2*16000000)*299792458*0.4
     #distance = (float(np.mean(RTT_time_buffer))-20074.659)/(2*16000000)*222222222
     return distance
+
+def ML_range_predic(RTT_time_buffer,rssi_buffer,RTT_based_time,model):
+    model_input = compute_model_input(RTT_time_buffer, rssi_buffer)
+    with torch.no_grad():
+        outdoor_predictions = model(model_input)
+    return outdoor_predictions
 
 def estimate_point_position(x1, y1, x2, y2, x3, y3, r1, r2, r3):
     grid_size = 0.1
@@ -122,24 +158,80 @@ def draw_circle(x1,y1,r):
     y = y1 + r * np.sin(theta)  # y坐标
     return x,y
 
+
+def GMM_filter(data):
+    #best_aic,best_bic = compute_number_of_components(data,1,5)
+    #n_components = best_aic  # 设置成分数量
+    n_components = 2
+    gmm = GaussianMixture(n_components=n_components)
+    try:
+        gmm.fit(data)
+    except:
+        lenghts = len(data)
+        gmm.fit(data.reshape((lenghts,1)))
+    means = gmm.means_
+    covariances = gmm.covariances_
+    weights = gmm.weights_
+
+    return means,covariances,weights
+
+def compute_model_input(RTT_time_list, RSSI_list):
+    RTT_mean = np.mean(np.array(RTT_time_list))
+    RTT_var = np.var(np.array(RTT_time_list))
+    RSSI_mean = np.array(np.mean(RSSI_list))
+    RSSI_var = np.var(np.mean(RSSI_list))
+
+    means,covariances,weights = GMM_filter(np.array(RTT_time_list))
+
+    RTT_component1_mean = means[0][0]
+    RTT_component1_var = covariances[0][0][0]
+    RTT_component2_mean = means[1][0]
+    RTT_component2_var = covariances[1][0][0]
+    RTT_component1_weight = weights[0]
+    RTT_component2_weight = weights[1]
+
+    model_input = [RTT_component1_mean,RTT_component1_var,
+                   RTT_component2_mean,RTT_component2_var,
+                   RTT_component1_weight,RTT_component2_weight,
+                   RTT_mean,RTT_var,
+                   RSSI_mean,RSSI_var]
+
+    model_input = torch.from_numpy(np.array(model_input)).float()
+    return model_input 
+
+
+
 #the main function using for visualizing the senser node position
 def main():
     ser = serial.Serial('COM4', 115200)  # Replace 'COM3' with your serial port and baud rate
     rawFrame = []
     DATA_INTERVAL = 0.005
+    based_RTT_time = [20074.806,20073.263,20073.28]
     
-    KF = Kalman_Filter(DATA_INTERVAL) 
+    KF = Kalman_Filter(DATA_INTERVAL)
+    input_size = 10
+    hidden_size = 512
+    output_size = 1
+    outdoor_model = RegressionNet(input_size, hidden_size, output_size)
+    outdoor_model.load_state_dict(torch.load('ML_outdoor_multi_RTT_localization/experiment3_outdoor_model'))
+
+    #outdoor_model.load_state_dict(torch.load('ML_outdoor_multi_RTT_localization/indoor_model'))
 
     dt = DATA_INTERVAL
 
     receiver1_measurement_list = []
     receiver2_measurement_list = []
     receiver3_measurement_list = []
-    itration = 1000
+
+    itration = 2000
     times = 0
-    receiver1_buffer = []
-    receiver2_buffer = []
-    receiver3_buffer = []
+
+    receiver1_RTT_buffer = []
+    receiver2_RTT_buffer = []
+    receiver3_RTT_buffer = []
+    receiver1_RSSI_buffer = []
+    receiver2_RSSI_buffer = []
+    receiver3_RSSI_buffer = []
 
     receiver1_measurement = 0
     receiver2_measurement = 0
@@ -148,7 +240,7 @@ def main():
     receiver_one_position = [0, 0]
     receiver_two_position = [5.25, 0]
     receiver_three_positon = [5.25, 2.5]
-    sender_true_position = [3, 2]
+    sender_true_position = [1.4, 1.4]
     receiver_id = 0
 
     est_x_list = []
@@ -161,12 +253,12 @@ def main():
         if rawFrame[-2:]==[13, 10]:
             if len(rawFrame) == 17:
                 receiver_id = rawFrame[0]
-                print('receiver_id:',receiver_id)
+                #print('receiver_id:',receiver_id)
                 decimal_data = int.from_bytes(rawFrame[1:5],byteorder='big')
-                print('RTT time:',decimal_data)
+                #print('RTT time:',decimal_data)
                 rssi = bytes(rawFrame[5:9])
-                rssi = rssi.decode('utf-8')
-                print('rssi:',rssi)
+                rssi = int(rssi.decode('utf-8'))
+                #print('rssi:',rssi)
                 (x_acc, y_acc, z_acc) = struct.unpack('>hhh', bytes(rawFrame[-8:-2]))                         
                 # debug info
                 output = 'acc_x={0:<3} acc_y={1:<3} acc_z={2:<3}'.format(
@@ -176,13 +268,22 @@ def main():
                 )
             
             if receiver_id == 1:
-                receiver1_measurement = RTT_range_predic(decimal_data, receiver1_buffer)
+                receiver1_measurement = RTT_range_predic(decimal_data, receiver1_RTT_buffer, based_RTT_time[0],rssi,receiver1_RSSI_buffer)
+                #receiver1_measurement = ML_range_predic(decimal_data, rssi,
+                #                                        receiver1_RTT_buffer, receiver1_RSSI_buffer,
+                #                                        based_RTT_time[0], outdoor_model)
                 receiver1_measurement_list.append(receiver1_measurement)
             if receiver_id == 2:
-                receiver2_measurement = RTT_range_predic(decimal_data, receiver2_buffer)
+                receiver2_measurement = RTT_range_predic(decimal_data, receiver2_RTT_buffer, based_RTT_time[1],rssi,receiver2_RSSI_buffer)
+                #receiver2_measurement = ML_range_predic(decimal_data, rssi,
+                #                                        receiver2_RTT_buffer, receiver2_RSSI_buffer,
+                #                                        based_RTT_time[1], outdoor_model)
                 receiver2_measurement_list.append(receiver2_measurement)
             if receiver_id == 3:
-                receiver3_measurement = RTT_range_predic(decimal_data, receiver3_buffer)
+                receiver3_measurement = RTT_range_predic(decimal_data, receiver3_RTT_buffer, based_RTT_time[2],rssi,receiver3_RSSI_buffer)
+                #receiver2_measurement = ML_range_predic(decimal_data, rssi,
+                #                                        receiver3_RTT_buffer, receiver3_RSSI_buffer,
+                #                                        based_RTT_time[2], outdoor_model)
                 receiver3_measurement_list.append(receiver3_measurement)
 
             rawFrame = []
@@ -193,35 +294,45 @@ def main():
             y_acc = float(y_acc)/float(4096)*8+0.19
             z_acc = float(z_acc)/float(4096)*8+2
 
-            print('acc output:',x_acc,y_acc,z_acc)
-            print('RTT measurement:', receiver1_measurement,receiver2_measurement,receiver3_measurement)
+            #print('acc output:',x_acc,y_acc,z_acc)
+            #print('RTT measurement:', receiver1_measurement,receiver2_measurement,receiver3_measurement)
 
             est_x, est_y = estimate_point_position(receiver_one_position[0],receiver_one_position[1],
                                                    receiver_two_position[0],receiver_two_position[1],
                                                    receiver_three_positon[0],receiver_three_positon[1],
                                                    receiver1_measurement,receiver2_measurement,receiver3_measurement)
-            print(est_x,est_y)
+            #print(est_x,est_y)
             est_x_list.append(est_x)
             est_y_list.append(est_y)
 
             times  = times + 1
             print('times:',times)
-
-    print('1:',np.mean(receiver1_measurement_list))
-    print('2:',np.mean(receiver2_measurement_list))
-    print('3:',np.mean(receiver3_measurement_list))
-    print('1:',len(receiver1_measurement_list))
-    print('2:',len(receiver2_measurement_list))
-    print('3:',len(receiver3_measurement_list))
+    
+    ML_receiver1_measurement = ML_range_predic(receiver1_RTT_buffer, receiver1_RSSI_buffer,based_RTT_time[0], outdoor_model)
+    ML_receiver2_measurement = ML_range_predic(receiver2_RTT_buffer, receiver2_RSSI_buffer,based_RTT_time[1], outdoor_model)
+    ML_receiver3_measurement = ML_range_predic(receiver3_RTT_buffer, receiver3_RSSI_buffer,based_RTT_time[2], outdoor_model)
+    print(ML_receiver1_measurement,ML_receiver2_measurement,ML_receiver3_measurement)
+    ML_est_x, ML_est_y = estimate_point_position(receiver_one_position[0],receiver_one_position[1],
+                                                   receiver_two_position[0],receiver_two_position[1],
+                                                   receiver_three_positon[0],receiver_three_positon[1],
+                                                   ML_receiver1_measurement,ML_receiver2_measurement,ML_receiver3_measurement)
+    
+    print('1:',np.mean(receiver1_RTT_buffer))
+    print('2:',np.mean(receiver2_RTT_buffer))
+    print('3:',np.mean(receiver3_RTT_buffer))
 
     # compute 1 meters and 2 meters error boundary
     _1meter_err_x,_1meter_err_y = draw_circle(sender_true_position[0],sender_true_position[1],1)
     _2meter_err_x,_2meter_err_y = draw_circle(sender_true_position[0],sender_true_position[1],2)
 
+
+    ML_err = ((ML_est_x - sender_true_position[0])**2 + (ML_est_y - sender_true_position[1]))**0.5
+    RTT_err = ((est_x_list[-1] - sender_true_position[0])**2 + (est_y_list[-1] - sender_true_position[1]))**0.5
     plt.figure()
     ax = plt.subplot(211)
     #ax.plot(est_x_list,est_y_list,c='b',label='estimate prosition')
-    ax.scatter(est_x_list[-1],est_y_list[-1],c='r',label='estimate position')
+    ax.scatter(est_x_list[-1],est_y_list[-1],c='r',label='RTT estimate position')
+    ax.scatter(ML_est_x,ML_est_y,c='y',label='ML estimate position')
     ax.scatter(receiver_one_position[0],receiver_one_position[1],c='b')
     ax.scatter(receiver_two_position[0],receiver_two_position[1],c='b')
     ax.scatter(receiver_three_positon[0],receiver_three_positon[1],c='b')
@@ -229,6 +340,7 @@ def main():
     ax.plot(_1meter_err_x, _1meter_err_y, c = 'g', linestyle = '--', label = '1 meters error boundary')
     ax.plot(_2meter_err_x, _2meter_err_y, c = 'g', linestyle = '--', label = '2 meters error boundary')
     ax.legend()
+    ax.set_title('ML_err:{} RTT_err:{}'.format(ML_err,RTT_err))
     ax.grid()
     
 
