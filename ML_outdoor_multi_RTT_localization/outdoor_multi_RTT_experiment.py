@@ -206,16 +206,16 @@ def main():
     ser = serial.Serial('COM4', 115200)  # Replace 'COM3' with your serial port and baud rate
     rawFrame = []
     DATA_INTERVAL = 0.005
-    based_RTT_time = [20074.806,20073.263,20073.28]
+    based_RTT_time = [20074.806,20074.263,20073.28]
     
     KF = Kalman_Filter(DATA_INTERVAL)
     input_size = 10
     hidden_size = 512
     output_size = 1
     outdoor_model = RegressionNet(input_size, hidden_size, output_size)
-    outdoor_model.load_state_dict(torch.load('ML_outdoor_multi_RTT_localization/experiment3_outdoor_model'))
+    #outdoor_model.load_state_dict(torch.load('ML_outdoor_multi_RTT_localization/experiment3_outdoor_model'))
 
-    #outdoor_model.load_state_dict(torch.load('ML_outdoor_multi_RTT_localization/indoor_model'))
+    outdoor_model.load_state_dict(torch.load('ML_outdoor_multi_RTT_localization/indoor_model'))
 
     dt = DATA_INTERVAL
 
@@ -326,8 +326,8 @@ def main():
     _2meter_err_x,_2meter_err_y = draw_circle(sender_true_position[0],sender_true_position[1],2)
 
 
-    ML_err = ((ML_est_x - sender_true_position[0])**2 + (ML_est_y - sender_true_position[1]))**0.5
-    RTT_err = ((est_x_list[-1] - sender_true_position[0])**2 + (est_y_list[-1] - sender_true_position[1]))**0.5
+    ML_err = ((ML_est_x - sender_true_position[0])**2 + (ML_est_y - sender_true_position[1])**2)**0.5
+    RTT_err = ((est_x_list[-1] - sender_true_position[0])**2 + (est_y_list[-1] - sender_true_position[1])**2)**0.5
     plt.figure()
     ax = plt.subplot(211)
     #ax.plot(est_x_list,est_y_list,c='b',label='estimate prosition')
@@ -343,6 +343,8 @@ def main():
     ax.set_title('ML_err:{} RTT_err:{}'.format(ML_err,RTT_err))
     ax.grid()
     
+    print(est_x_list[-1],est_y_list[-1])
+    print(ML_est_x,ML_est_y)
 
     ax = plt.subplot(212)
     ax.plot([i for i in range(len(receiver1_measurement_list))],receiver1_measurement_list,c='r',label='receiver 1')
